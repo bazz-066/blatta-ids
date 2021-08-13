@@ -14,7 +14,24 @@ fn main() {
     //let mut socket = RawSocket::new(ifname.as_ref()).unwrap();
     let port_filter = Box::new([0u8]);
     let mut reader_thread = stream::StreamReaderThread::new(port_filter, false, ifname);
-    reader_thread.start_listening()
+    reader_thread.start_listening();
+    // this bloody piece of code below is unreachable
+    println!("Trying to get ready connection");
+
+    let handle = thread::spawn(move || {
+        loop {
+            let data_received = reader_thread.get_ready_conn();
+            println!("Trying to get ready connection");
+            match data_received {
+                Some(reconstructed_packets) => {
+                    println!("{}", String::from_utf8_lossy(&reconstructed_packets.get_init_tcp_message()));
+                }
+                None => {}
+            }
+        }
+    });
+
+    handle.join();
 
     //ctrlc::set_handler(move || {
     //    println!("received Ctrl+C!");

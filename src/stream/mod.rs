@@ -6,6 +6,7 @@ use std::str;
 use std::os::unix::io::AsRawFd;
 use std::time::{Instant, Duration};
 use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::{AtomicBool,Ordering};
 use std::sync::mpsc::SendError;
 
 use smoltcp::phy::wait as phy_wait;
@@ -17,11 +18,12 @@ use smoltcp::wire::*;
 struct WorkerHandler {
     handle: JoinHandle<Result<(), ()>>,     //the reconstructing thread handle
     sender: mpsc::Sender<Vec<u8>>,          //to send the packet to be reconstructed
+    is_done: Arc<AtomicBool>
 }
 
 impl WorkerHandler {
-    fn new(handle: JoinHandle<Result<(), ()>>, sender: mpsc::Sender<Vec<u8>>) -> WorkerHandler {
-        WorkerHandler { handle, sender }
+    fn new(handle: JoinHandle<Result<(), ()>>, sender: mpsc::Sender<Vec<u8>>, is_done: Arc<AtomicBool>) -> WorkerHandler {
+        WorkerHandler { handle, sender, is_done }
     }
 }
 
@@ -31,6 +33,8 @@ pub struct StreamReaderThread {
     port_filter: Box<[u8]>,
     is_delete_read_conn: bool,
     ifname: String,
+    req_cmd_sender: Option<mpsc::Sender<Message>>,
+    resp_cmd_receiver: Option<Arc<Mutex<mpsc::Receiver<ReconstructedPackets>>>>
     //socket: RawSocket
 }
 
@@ -42,6 +46,8 @@ impl StreamReaderThread {
             port_filter: port_filter,
             is_delete_read_conn: is_delete_read_conn,
             ifname: ifname,
+            req_cmd_sender: None,
+            resp_cmd_receiver: None
         }
     }
 
@@ -52,12 +58,14 @@ impl StreamReaderThread {
         let (packets_sender, packets_receiver) = mpsc::channel();
         let (req_cmd_sender, req_cmd_receiver) = mpsc::channel();
         let (resp_cmd_sender, resp_cmd_receiver) = mpsc::channel();
+        self.req_cmd_sender = Some(req_cmd_sender);
 
         // set up mutex for the receivers
         let packets_receiver = Arc::new(Mutex::new(packets_receiver));
         let req_cmd_receiver = Arc::new(Mutex::new(req_cmd_receiver));
         let resp_cmd_receiver = Arc::new(Mutex::new(resp_cmd_receiver));
-
+        self.resp_cmd_receiver = Some(resp_cmd_receiver);
+        
         let mut rst_object = ReadyServeThread::new(req_cmd_receiver, resp_cmd_sender, packets_receiver);
         let _rst_handle = thread::spawn(move || {
             loop {
@@ -135,7 +143,10 @@ impl StreamReaderThread {
                         let receiver = Arc::new(Mutex::new(receiver));
                         let key_copy = key.clone();
                         let cloned_packets_sender = packets_sender.clone();
-                        let mut monitor = Monitor::new(key, reverse_key, _frame_payload.to_vec(), receiver, cloned_packets_sender);
+                        let is_done = Arc::new(AtomicBool::new(false));
+                        let cloned_is_done = is_done.clone();
+
+                        let mut monitor = Monitor::new(key, reverse_key, _frame_payload.to_vec(), receiver, cloned_packets_sender, cloned_is_done);
 
                         let handle = thread::spawn(move || {
                             while monitor.last_update.elapsed().as_secs() < 10 {
@@ -153,13 +164,53 @@ impl StreamReaderThread {
                         });
 
                         sender.send(_frame_payload.to_vec()).unwrap();
-                        let worker_handler = WorkerHandler::new(handle, sender);
+                        let worker_handler = WorkerHandler::new(handle, sender, is_done);
                         self.conn_list.insert(key_copy, worker_handler);
                     }
 
                 }
+
                 Ok(())
             }).unwrap();
+
+            // TODO: clean up finished TCP connections
+            let finished_conns: Vec<_> = self.conn_list.iter_mut()
+                .filter(|(_, v)| v.is_done.load(Ordering::Relaxed) == true)
+                .map(|(k, _)| k.clone())
+                .collect();
+
+            //println!("Num of finished connections in the hashmap: {}", finished_conns.len());
+
+            for finished_conn in finished_conns { 
+                println!("Deleting connection {}", finished_conn);
+                self.conn_list.remove(&finished_conn); 
+            }
+
+        }
+    }
+
+    pub fn get_ready_conn(&mut self) -> Option<ReconstructedPackets> {
+        match &self.req_cmd_sender {
+            Some(req_cmd_sender) => {
+                req_cmd_sender.send(Message::ReadyConnRequest);
+            }
+            None => panic!("Sender has not been initialised")
+        }
+
+        match &self.resp_cmd_receiver {
+            Some(resp_cmd_receiver) => {
+                let data_received = resp_cmd_receiver.lock().unwrap().try_recv();
+                match data_received {
+                    Ok(reconstructed_packets) => Some(reconstructed_packets),
+                    Err(_) => {
+                        println!("No data yet");
+                        None
+                    }
+                }
+            }
+            None => {
+                panic!("Receiver has not been initialised");
+            }
         }
     }
 
@@ -186,6 +237,34 @@ impl ReconstructedPackets {
             init_packets: init_packets,
             resp_packets: resp_packets
         }
+    }
+
+    pub fn get_init_tcp_message(&self) -> Vec<u8> {
+        let mut payload_bytes = Vec::new();
+
+        for packet in &self.init_packets {
+            let _stored_packet = Ipv4Packet::new_unchecked(packet.as_slice());
+            let _stored_packet_payload = _stored_packet.payload();
+            let _stored_segment = TcpPacket::new_unchecked(_stored_packet_payload);
+
+            payload_bytes.extend_from_slice(_stored_segment.payload());
+        }
+
+        payload_bytes
+    }
+
+    pub fn get_resp_tcp_message(&self) -> Vec<u8> {
+        let mut payload_bytes = Vec::new();
+
+        for packet in &self.resp_packets {
+            let _stored_packet = Ipv4Packet::new_unchecked(packet.as_slice());
+            let _stored_packet_payload = _stored_packet.payload();
+            let _stored_segment = TcpPacket::new_unchecked(_stored_packet_payload);
+
+            payload_bytes.extend_from_slice(_stored_segment.payload());
+        }
+
+        payload_bytes
     }
 }
 
@@ -231,11 +310,12 @@ struct Monitor {
     last_update: Instant,
     receiver: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
     packets_sender: mpsc::Sender<ReconstructedPackets>,
-    tcp_state: TcpState
+    tcp_state: TcpState,
+    is_done: Arc<AtomicBool>
 }
 
 impl Monitor {
-    fn new(key: String, reverse_key: String, packet: Vec<u8>, receiver: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>, packets_sender: mpsc::Sender<ReconstructedPackets>) -> Monitor {
+    fn new(key: String, reverse_key: String, packet: Vec<u8>, receiver: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>, packets_sender: mpsc::Sender<ReconstructedPackets>, is_done: Arc<AtomicBool>) -> Monitor {
         let mut packets = Vec::new();
         packets.push(packet);
         Monitor { 
@@ -248,6 +328,7 @@ impl Monitor {
             receiver: receiver,
             packets_sender: packets_sender,
             tcp_state: TcpState::Established,
+            is_done: is_done
         }
     }
 
@@ -316,8 +397,13 @@ impl Monitor {
 
         if _tcp_segment.ack() && self.tcp_state == TcpState::TimeWait {
             println!("TCP Connection ended normally");
-            self.tcp_state = TcpState::Closed;
+            self.done_processing()
         }
+    }
+
+    fn done_processing(&mut self) {
+        self.tcp_state = TcpState::Closed;
+        self.is_done.store(true, Ordering::SeqCst);
     }
 
     fn send_reconstructed_packets(&mut self) {
