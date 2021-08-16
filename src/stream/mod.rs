@@ -27,45 +27,28 @@ impl WorkerHandler {
     }
 }
 
-pub struct StreamReaderThread {
-    conn_list: HashMap<String, WorkerHandler>,
-    ready_conn_list: HashMap<String, WorkerHandler>,
-    port_filter: Box<[u8]>,
-    is_delete_read_conn: bool,
-    ifname: String,
+pub struct StreamReaderController {
     req_cmd_sender: Option<mpsc::Sender<Message>>,
-    resp_cmd_receiver: Option<Arc<Mutex<mpsc::Receiver<ReconstructedPackets>>>>
-    //socket: RawSocket
+    resp_cmd_receiver: Option<Arc<Mutex<mpsc::Receiver<ReconstructedPackets>>>>,
+    srt_handle: JoinHandle<Result<(), ()>>
 }
 
-impl StreamReaderThread {
-    pub fn new(port_filter: Box<[u8]>, is_delete_read_conn: bool, ifname: String) -> StreamReaderThread {
-        StreamReaderThread {
-            conn_list: HashMap::new(),
-            ready_conn_list: HashMap::new(),
-            port_filter: port_filter,
-            is_delete_read_conn: is_delete_read_conn,
-            ifname: ifname,
-            req_cmd_sender: None,
-            resp_cmd_receiver: None
-        }
-    }
+impl StreamReaderController{
+    pub fn new(port_filter: Box<[u8]>, is_delete_read_conn: bool, ifname: String) -> StreamReaderController {
 
-    pub fn start_listening(&mut self) -> () {
-        let mut socket = RawSocket::new(self.ifname.as_ref()).unwrap();
-        
         // channels declaration
-        let (packets_sender, packets_receiver) = mpsc::channel();
         let (req_cmd_sender, req_cmd_receiver) = mpsc::channel();
         let (resp_cmd_sender, resp_cmd_receiver) = mpsc::channel();
-        self.req_cmd_sender = Some(req_cmd_sender);
-
+        let (packets_sender, packets_receiver) = mpsc::channel();
+        let req_cmd_sender = Some(req_cmd_sender);
+        
         // set up mutex for the receivers
-        let packets_receiver = Arc::new(Mutex::new(packets_receiver));
         let req_cmd_receiver = Arc::new(Mutex::new(req_cmd_receiver));
         let resp_cmd_receiver = Arc::new(Mutex::new(resp_cmd_receiver));
-        self.resp_cmd_receiver = Some(resp_cmd_receiver);
-        
+        let packets_receiver = Arc::new(Mutex::new(packets_receiver));
+        let resp_cmd_receiver = Some(resp_cmd_receiver);
+
+
         let mut rst_object = ReadyServeThread::new(req_cmd_receiver, resp_cmd_sender, packets_receiver);
         let _rst_handle = thread::spawn(move || {
             loop {
@@ -97,6 +80,72 @@ impl StreamReaderThread {
             }
         });
 
+        let mut stream_reader_thread = StreamReaderThread::new(port_filter, is_delete_read_conn, ifname);
+        let srt_handle = thread::spawn(move || {
+            stream_reader_thread.start_listening(packets_sender);
+
+            Ok(())
+        });
+
+        StreamReaderController {
+            req_cmd_sender: req_cmd_sender,
+            resp_cmd_receiver: resp_cmd_receiver,
+            srt_handle: srt_handle
+        }
+    }
+
+    pub fn get_ready_conn(&mut self) -> Option<ReconstructedPackets> {
+        match &self.req_cmd_sender {
+            Some(req_cmd_sender) => {
+                req_cmd_sender.send(Message::ReadyConnRequest);
+            }
+            None => panic!("Sender has not been initialised")
+        }
+
+        match &self.resp_cmd_receiver {
+            Some(resp_cmd_receiver) => {
+                let data_received = resp_cmd_receiver.lock().unwrap().try_recv();
+                match data_received {
+                    Ok(reconstructed_packets) => Some(reconstructed_packets),
+                    Err(_) => {
+                        //println!("No data yet");
+                        None
+                    }
+                }
+            }
+            None => {
+                panic!("Receiver has not been initialised");
+            }
+        }
+    }
+}
+
+struct StreamReaderThread {
+    conn_list: HashMap<String, WorkerHandler>,
+    ready_conn_list: HashMap<String, WorkerHandler>,
+    port_filter: Box<[u8]>,
+    is_delete_read_conn: bool,
+    ifname: String,
+    //socket: RawSocket
+}
+
+impl StreamReaderThread {
+    pub fn new(port_filter: Box<[u8]>, 
+               is_delete_read_conn: bool, 
+               ifname: String) -> StreamReaderThread {
+        
+        StreamReaderThread {
+            conn_list: HashMap::new(),
+            ready_conn_list: HashMap::new(),
+            port_filter: port_filter,
+            is_delete_read_conn: is_delete_read_conn,
+            ifname: ifname,
+        }
+    }
+
+    pub fn start_listening(&mut self, packets_sender: mpsc::Sender<ReconstructedPackets>) -> () {
+        let mut socket = RawSocket::new(self.ifname.as_ref()).unwrap();
+       
         loop {
             phy_wait(socket.as_raw_fd(), None).unwrap();
             let (rx_token, _) = socket.receive().unwrap();
@@ -184,32 +233,6 @@ impl StreamReaderThread {
             for finished_conn in finished_conns { 
                 println!("Deleting connection {}", finished_conn);
                 self.conn_list.remove(&finished_conn); 
-            }
-
-        }
-    }
-
-    pub fn get_ready_conn(&mut self) -> Option<ReconstructedPackets> {
-        match &self.req_cmd_sender {
-            Some(req_cmd_sender) => {
-                req_cmd_sender.send(Message::ReadyConnRequest);
-            }
-            None => panic!("Sender has not been initialised")
-        }
-
-        match &self.resp_cmd_receiver {
-            Some(resp_cmd_receiver) => {
-                let data_received = resp_cmd_receiver.lock().unwrap().try_recv();
-                match data_received {
-                    Ok(reconstructed_packets) => Some(reconstructed_packets),
-                    Err(_) => {
-                        println!("No data yet");
-                        None
-                    }
-                }
-            }
-            None => {
-                panic!("Receiver has not been initialised");
             }
         }
     }
