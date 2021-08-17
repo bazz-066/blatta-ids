@@ -57,9 +57,9 @@ impl StreamReaderController{
                     Ok(cmd) => match cmd {
                         Message::ReadyConnRequest => {
                             let retval = rst_object.pop_conn();
-                            if retval == true {
-                                println!("New ready connection has been sent");
-                            }
+                            //if retval != true {
+                            //    panic!("New ready connection failed to send");
+                            //}
                         },
                         Message::StopThread => break
                     }, // TODO: process command
@@ -69,7 +69,7 @@ impl StreamReaderController{
                 let data_received = rst_object.packets_receiver.lock().unwrap().try_recv();
                 match data_received {
                     Ok(reconstructed_packets) => {
-                        println!("New ready TCP connection!");
+                        //println!("New ready TCP connection!");
                         rst_object.push_conn(reconstructed_packets); 
                     }
                     Err(why) => {}
@@ -161,7 +161,7 @@ impl StreamReaderThread {
                     let reverse_key = format!("{}:{}:{}:{}", _ipv4_packet.dst_addr(), _tcp_segment.dst_port(), _ipv4_packet.src_addr(), _tcp_segment.src_port());
                     let mut is_processed = false;
 
-                    //println!("{}:{} -> {}:{}", _ipv4_packet.src_addr(), _tcp_segment.src_port(), _ipv4_packet.dst_addr(), _tcp_segment.dst_port());
+                    //println!("{}:{} -> {}:{} [LEN: {}]", _ipv4_packet.src_addr(), _tcp_segment.src_port(), _ipv4_packet.dst_addr(), _tcp_segment.dst_port(), _tcp_segment.segment_len());
                     if self.conn_list.contains_key(&key) {
                         let worker_handler = self.conn_list.get_mut(&key).unwrap();
                         match worker_handler.sender.send(_frame_payload.to_vec()) {
@@ -169,7 +169,7 @@ impl StreamReaderThread {
                                 is_processed = true;
                             }
                             Err(why) => {
-                                println!("Removing thread {}", key);
+                                //println!("Removing thread {}", key);
                                 self.conn_list.remove(&key);
                             }
                         }
@@ -181,7 +181,7 @@ impl StreamReaderThread {
                                 is_processed = true;
                             }
                             Err(why) => {
-                                println!("Removing thread {}", reverse_key);
+                                //println!("Removing thread {}", reverse_key);
                                 self.conn_list.remove(&reverse_key);
                             }
                         }
@@ -231,7 +231,7 @@ impl StreamReaderThread {
             //println!("Num of finished connections in the hashmap: {}", finished_conns.len());
 
             for finished_conn in finished_conns { 
-                println!("Deleting connection {}", finished_conn);
+                //println!("Deleting connection {}", finished_conn);
                 self.conn_list.remove(&finished_conn); 
             }
         }
@@ -265,13 +265,16 @@ impl ReconstructedPackets {
     pub fn get_init_tcp_message(&self) -> Vec<u8> {
         let mut payload_bytes = Vec::new();
 
+        //println!("Num packets: {}", self.init_packets.len());
         for packet in &self.init_packets {
             let _stored_packet = Ipv4Packet::new_unchecked(packet.as_slice());
             let _stored_packet_payload = _stored_packet.payload();
             let _stored_segment = TcpPacket::new_unchecked(_stored_packet_payload);
-
+            
+            //println!("payload: {:x?}", _stored_segment.payload());
             payload_bytes.extend_from_slice(_stored_segment.payload());
         }
+        //println!("Num bytes: {}", payload_bytes.len());
 
         payload_bytes
     }
@@ -279,15 +282,27 @@ impl ReconstructedPackets {
     pub fn get_resp_tcp_message(&self) -> Vec<u8> {
         let mut payload_bytes = Vec::new();
 
+        //println!("RESP Num packets: {}", self.resp_packets.len());
         for packet in &self.resp_packets {
             let _stored_packet = Ipv4Packet::new_unchecked(packet.as_slice());
             let _stored_packet_payload = _stored_packet.payload();
             let _stored_segment = TcpPacket::new_unchecked(_stored_packet_payload);
 
+            //println!("RESP payload: {:x?}", _stored_segment.payload());
             payload_bytes.extend_from_slice(_stored_segment.payload());
         }
 
+        //println!("RESP Num bytes: {}", payload_bytes.len());
         payload_bytes
+    }
+
+    pub fn get_tcp_tuple(&self) -> String {
+        let packet = &self.init_packets[0];
+        let _stored_packet = Ipv4Packet::new_unchecked(packet.as_slice());
+        let _stored_packet_payload = _stored_packet.payload();
+        let _stored_segment = TcpPacket::new_unchecked(_stored_packet_payload);
+
+        format!("{}:{}->{}:{}", _stored_packet.src_addr(), _stored_segment.src_port(), _stored_packet.dst_addr(), _stored_segment.dst_port()).to_string()
     }
 }
 
@@ -362,22 +377,24 @@ impl Monitor {
         let _tcp_segment = TcpPacket::new_unchecked(_ipv4_payload);
 
         let key = format!("{}:{}:{}:{}", _ipv4_packet.src_addr(), _tcp_segment.src_port(), _ipv4_packet.dst_addr(), _tcp_segment.dst_port());
-        //println!("{}", key);
+        //println!("PUSH {} [LEN: {},  SEQ: {}, ACK: {}, checksum: {}]", key, _tcp_segment.payload().len(), _tcp_segment.seq_number(), _tcp_segment.ack_number(), _tcp_segment.checksum());
 
         if key == self.key {
             // convert to TcpPacket
             // look for the appropriate place to put the segment
+            
             for i in (0..self.init_packets.len()).rev() {
                 let _stored_packet = Ipv4Packet::new_unchecked(self.init_packets[i].as_slice());
                 let _stored_packet_payload = _stored_packet.payload();
                 let _stored_segment = TcpPacket::new_unchecked(_stored_packet_payload);
 
                 // duplicate packet
-                if _stored_segment.seq_number().eq(&_tcp_segment.seq_number()) {
+                if _stored_segment.checksum() == _tcp_segment.checksum() {
                     self.last_update = Instant::now();
                     break
                 }
-                else if _stored_segment.seq_number().ge(&_tcp_segment.seq_number()) {
+                else if _stored_segment.seq_number().le(&_tcp_segment.seq_number()) {
+                    //println!("PUSH2 {} [LEN: {}]", key, _tcp_segment.payload().len());
                     self.init_packets.insert(i+1, packet);
                     self.last_update = Instant::now();
                     break;
@@ -396,11 +413,11 @@ impl Monitor {
                     let _stored_segment = TcpPacket::new_unchecked(_stored_packet_payload);
 
                     // duplicate packet
-                    if _stored_segment.seq_number().eq(&_tcp_segment.seq_number()) {
+                    if _stored_segment.checksum() == _tcp_segment.checksum() {
                         self.last_update = Instant::now();
                         break
                     }
-                    else if _stored_segment.seq_number().ge(&_tcp_segment.seq_number()) {
+                    else if _stored_segment.seq_number().le(&_tcp_segment.seq_number()) {
                         self.resp_packets.insert(i+1, packet);
                         self.last_update = Instant::now();
                         break;
@@ -419,7 +436,7 @@ impl Monitor {
         }
 
         if _tcp_segment.ack() && self.tcp_state == TcpState::TimeWait {
-            println!("TCP Connection ended normally");
+            //println!("TCP Connection ended normally");
             self.done_processing()
         }
     }
