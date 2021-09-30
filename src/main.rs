@@ -7,37 +7,48 @@ use std::os::unix::io::AsRawFd;
 use std::str;
 use std::thread;
 
-use pcap_file::pcap::{PcapParser, PcapReader};
-use pcap_file::PcapError;
-use std::fs::File;
+use tch::nn::RNNConfig;
+
+//use pcap_file::pcap::{PcapParser, PcapReader};
+//use pcap_file::PcapError;
+//use std::fs::File;
 
 mod stream;
+mod rnn;
 
 fn main() {
-    let ifname = env::args().nth(1).unwrap();
-    //let mut socket = RawSocket::new(ifname.as_ref()).unwrap();
-    let port_filter = Box::new([80u8]);
-    let mut srt_controller = stream::StreamReaderController::new(port_filter, false, ifname);
-    
-    let handle = thread::spawn(move || {
-        loop {
-            let data_received = srt_controller.get_ready_conn();
-            //println!("Trying to get ready connection");
-            match data_received {
-                Some(reconstructed_packets) => {
-                    println!("New TCP message: {}", &reconstructed_packets.get_tcp_tuple());
-                    println!("Init TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_init_tcp_message()));
-                    println!("Resp TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_resp_tcp_message()));
-                    //println!("New TCP message: {:x?}", &reconstructed_packets.get_init_tcp_message());
-                    //reconstructed_packets.get_init_tcp_message();
-                    //reconstructed_packets.get_resp_tcp_message();
-                }
-                None => {}
-            }
-        }
-    });
+    //let ifname = env::args().nth(1).unwrap();
+    ////let mut socket = RawSocket::new(ifname.as_ref()).unwrap();
+    //let port_filter = Box::new([80u8]);
+    //let mut srt_controller = stream::StreamReaderController::new(port_filter, false, ifname);
+    //
+    //let handle = thread::spawn(move || {
+    //    loop {
+    //        let data_received = srt_controller.get_ready_conn();
+    //        //println!("Trying to get ready connection");
+    //        match data_received {
+    //            Some(reconstructed_packets) => {
+    //                println!("New TCP message: {}", &reconstructed_packets.get_tcp_tuple());
+    //                println!("Init TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_init_tcp_message()));
+    //                println!("Resp TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_resp_tcp_message()));
+    //                //println!("New TCP message: {:x?}", &reconstructed_packets.get_init_tcp_message());
+    //                //reconstructed_packets.get_init_tcp_message();
+    //                //reconstructed_packets.get_resp_tcp_message();
+    //            }
+    //            None => {}
+    //        }
+    //    }
+    //});
 
-    handle.join();
+    //handle.join();
+    //
+
+    //let config = rnn::NetworkConfig::new(5, 64, 32, 0.2, rnn::RecurrentLayer::Lstm);
+    //let rnn_config: RNNConfig = Default::default();
+
+    //rnn::run(config, rnn_config);
+    //println!("HOOOOOUUU");
+    rnn::preprocessing((0..20).collect(), 5, 1);
 
     //ctrlc::set_handler(move || {
     //    println!("received Ctrl+C!");

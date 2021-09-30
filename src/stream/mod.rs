@@ -304,6 +304,16 @@ impl ReconstructedPackets {
 
         format!("{}:{}->{}:{}", _stored_packet.src_addr(), _stored_segment.src_port(), _stored_packet.dst_addr(), _stored_segment.dst_port()).to_string()
     }
+
+    pub fn get_rev_tcp_tuple(&self) -> String {
+        let packet = &self.init_packets[0];
+        let _stored_packet = Ipv4Packet::new_unchecked(packet.as_slice());
+        let _stored_packet_payload = _stored_packet.payload();
+        let _stored_segment = TcpPacket::new_unchecked(_stored_packet_payload);
+
+        format!("{}:{}->{}:{}", _stored_packet.dst_addr(), _stored_segment.dst_port(), _stored_packet.src_addr(), _stored_segment.src_port()).to_string()
+    }
+
 }
 
 pub struct ReadyServeThread {
