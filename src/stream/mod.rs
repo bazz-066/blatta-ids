@@ -15,6 +15,12 @@ use smoltcp::socket::TcpState;
 use smoltcp::time::Instant as SmoltcpInstant;
 use smoltcp::wire::*;
 
+pub enum PacketDirection {
+    Init,
+    Resp,
+    Both
+}
+
 struct WorkerHandler {
     handle: JoinHandle<Result<(), ()>>,     //the reconstructing thread handle
     sender: mpsc::Sender<Vec<u8>>,          //to send the packet to be reconstructed

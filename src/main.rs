@@ -5,6 +5,7 @@ use smoltcp::wire::{EthernetFrame, PrettyPrinter, Ipv4Packet, EthernetProtocol, 
 use std::env;
 use std::os::unix::io::AsRawFd;
 use std::str;
+use std::sync::mpsc;
 use std::thread;
 
 use tch::nn::RNNConfig;
@@ -17,31 +18,38 @@ mod stream;
 mod rnn;
 
 fn main() {
-    //let ifname = env::args().nth(1).unwrap();
-    ////let mut socket = RawSocket::new(ifname.as_ref()).unwrap();
-    //let port_filter = Box::new([80u8]);
-    //let mut srt_controller = stream::StreamReaderController::new(port_filter, false, ifname);
-    //
-    //let handle = thread::spawn(move || {
-    //    loop {
-    //        let data_received = srt_controller.get_ready_conn();
-    //        //println!("Trying to get ready connection");
-    //        match data_received {
-    //            Some(reconstructed_packets) => {
-    //                println!("New TCP message: {}", &reconstructed_packets.get_tcp_tuple());
-    //                println!("Init TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_init_tcp_message()));
-    //                println!("Resp TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_resp_tcp_message()));
-    //                //println!("New TCP message: {:x?}", &reconstructed_packets.get_init_tcp_message());
-    //                //reconstructed_packets.get_init_tcp_message();
-    //                //reconstructed_packets.get_resp_tcp_message();
-    //            }
-    //            None => {}
-    //        }
-    //    }
-    //});
+    let ifname = env::args().nth(1).unwrap();
+    let path = "/home/baskoro/Documents/Research/IDS/data/";
+    //let mut socket = RawSocket::new(ifname.as_ref()).unwrap();
+    let port_filter = Box::new([80u8]);
+    let mut srt_controller = stream::StreamReaderController::new(port_filter, false, ifname);
+    
+    let (packets_sender, packets_receiver) = mpsc::channel();
 
-    //handle.join();
-    //
+    let handle = thread::spawn(move || {
+        let n = 5;
+        let stride = 1;
+
+        loop {
+            let data_received = srt_controller.get_ready_conn();
+            //println!("Trying to get ready connection");
+            match data_received {
+                Some(reconstructed_packets) => {
+                    
+                    //println!("New TCP message: {}", &reconstructed_packets.get_tcp_tuple());
+                    //println!("Init TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_init_tcp_message()));
+                    //println!("Resp TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_resp_tcp_message()));
+                    //println!("New TCP message: {:x?}", &reconstructed_packets.get_init_tcp_message());
+                    let byte_sequences = rnn::preprocessing(reconstructed_packets.get_init_tcp_message(), n, stride);
+                    //reconstructed_packets.get_resp_tcp_message();
+                }
+                None => {}
+            }
+        }
+    });
+
+    handle.join();
+    
 
     //let config = rnn::NetworkConfig::new(5, 64, 32, 0.2, rnn::RecurrentLayer::Lstm);
     //let rnn_config: RNNConfig = Default::default();
