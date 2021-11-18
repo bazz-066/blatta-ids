@@ -17,18 +17,28 @@ use tch::nn::RNNConfig;
 mod stream;
 mod rnn;
 
+use rnn::RecurrentModel;
+
 fn main() {
     let ifname = env::args().nth(1).unwrap();
-    let path = "/home/baskoro/Documents/Research/IDS/data/";
+    let path = "/home/baskoro/Documents/Research/IDS/data/".to_string();
     //let mut socket = RawSocket::new(ifname.as_ref()).unwrap();
     let port_filter = Box::new([80u8]);
     let mut srt_controller = stream::StreamReaderController::new(port_filter, false, ifname);
     
-    let (packets_sender, packets_receiver) = mpsc::channel();
+    let (packets_sender, packets_receiver): (mpsc::Sender<stream::ReconstructedPackets>, mpsc::Receiver<stream::ReconstructedPackets>) = mpsc::channel();
 
     let handle = thread::spawn(move || {
-        let n = 5;
-        let stride = 1;
+        let n: usize = 5;
+        let stride: usize = 1;
+        let embedding_dim: i64 = 64;
+        let hidden_dim: i64 = 32;
+        let dropout: f64 = 0.2;
+
+        let network_config = rnn::NetworkConfig::new(n, stride, embedding_dim, hidden_dim, dropout, rnn::RecurrentLayer::Lstm);
+        let rnn_config: RNNConfig = Default::default();
+
+        let recurrent_model = rnn::LSTMModel::new(network_config, rnn_config);
 
         loop {
             let data_received = srt_controller.get_ready_conn();
@@ -40,9 +50,12 @@ fn main() {
                     //println!("Init TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_init_tcp_message()));
                     //println!("Resp TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_resp_tcp_message()));
                     //println!("New TCP message: {:x?}", &reconstructed_packets.get_init_tcp_message());
-                    let byte_sequences = rnn::preprocessing(reconstructed_packets.get_init_tcp_message(), n, stride);
+                    
+                    rnn::save(&reconstructed_packets, &path);
+                    recurrent_model.train_model_with_packet(&reconstructed_packets, stream::PacketDirection::Init);
+                    //let byte_sequences = rnn::preprocessing(reconstructed_packets.get_init_tcp_message(), n, stride);
                     //reconstructed_packets.get_resp_tcp_message();
-                }
+                },
                 None => {}
             }
         }
@@ -56,7 +69,7 @@ fn main() {
 
     //rnn::run(config, rnn_config);
     //println!("HOOOOOUUU");
-    rnn::preprocessing((0..20).collect(), 5, 1);
+    //rnn::preprocessing((0..20).collect(), 5, 1);
 
     //ctrlc::set_handler(move || {
     //    println!("received Ctrl+C!");
