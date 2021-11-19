@@ -1,6 +1,6 @@
 # Blatta IDS: Memory-Safe and Intelligent Network-Based HTTP Threat Detection
 
-## What is Blatta IDS
+## What is Blatta IDS (v0.1)
 
 Blatta IDS is a network-based HTTP intrusion detection built with Rust such that it is safer from memory-based exploitation and can handle multithreading better than Python-based IDS. Other features of Blatta IDS are:
 
