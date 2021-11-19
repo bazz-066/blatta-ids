@@ -40,7 +40,7 @@ pub struct StreamReaderController {
 }
 
 impl StreamReaderController{
-    pub fn new(port_filter: Box<[u8]>, is_delete_read_conn: bool, ifname: String) -> StreamReaderController {
+    pub fn new(port_filter: Vec<u16>, is_delete_read_conn: bool, ifname: String) -> StreamReaderController {
 
         // channels declaration
         let (req_cmd_sender, req_cmd_receiver) = mpsc::channel();
@@ -129,14 +129,14 @@ impl StreamReaderController{
 struct StreamReaderThread {
     conn_list: HashMap<String, WorkerHandler>,
     ready_conn_list: HashMap<String, WorkerHandler>,
-    port_filter: Box<[u8]>,
+    port_filter: Vec<u16>,
     is_delete_read_conn: bool,
     ifname: String,
     //socket: RawSocket
 }
 
 impl StreamReaderThread {
-    pub fn new(port_filter: Box<[u8]>, 
+    pub fn new(port_filter: Vec<u16>, 
                is_delete_read_conn: bool, 
                ifname: String) -> StreamReaderThread {
         
@@ -166,6 +166,11 @@ impl StreamReaderThread {
                     let key = format!("{}:{}:{}:{}", _ipv4_packet.src_addr(), _tcp_segment.src_port(), _ipv4_packet.dst_addr(), _tcp_segment.dst_port());
                     let reverse_key = format!("{}:{}:{}:{}", _ipv4_packet.dst_addr(), _tcp_segment.dst_port(), _ipv4_packet.src_addr(), _tcp_segment.src_port());
                     let mut is_processed = false;
+
+                    // filter out unnecessary packets
+                    if (self.port_filter.contains(&_tcp_segment.dst_port())) || (self.port_filter.contains(&_tcp_segment.src_port())) {
+                        ()
+                    }
 
                     //println!("{}:{} -> {}:{} [LEN: {}]", _ipv4_packet.src_addr(), _tcp_segment.src_port(), _ipv4_packet.dst_addr(), _tcp_segment.dst_port(), _tcp_segment.segment_len());
                     if self.conn_list.contains_key(&key) {

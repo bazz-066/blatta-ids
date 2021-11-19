@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use ndarray::prelude::*;
 use ndarray::{Axis, concatenate, stack, Array2};
 use std::any::Any;
@@ -76,7 +76,7 @@ pub fn preprocessing(message: Vec<u8>, seq_len: usize, stride: usize) -> Array2<
         i+=stride;
     }
 
-    println!("{:?}", byte_sequences);
+    //println!("{:?}", byte_sequences);
     byte_sequences
 }
 
@@ -100,6 +100,7 @@ pub fn preprocessing(message: Vec<u8>, seq_len: usize, stride: usize) -> Array2<
 // 
 pub trait RecurrentModel {
     fn train_model_with_packet(&self, reconstructed_packets: &stream::ReconstructedPackets, direction: stream::PacketDirection) -> Result<()>;
+    fn detect_conn(&self, reconstructed_packets: &stream::ReconstructedPackets, direction: stream::PacketDirection, threshold: f64) -> Result<bool>;
 }
 
 pub struct LSTMModel {
@@ -114,6 +115,16 @@ pub struct LSTMModel {
 
 impl RecurrentModel for LSTMModel{
     fn train_model_with_packet(&self, reconstructed_packets: &stream::ReconstructedPackets, direction: stream::PacketDirection) -> Result<()>{
+        match(direction) {
+            stream::PacketDirection::Init => if reconstructed_packets.get_init_tcp_message().len() <= self.network_config.seq_len * self.network_config.stride {
+                return Err(anyhow!("Message not long enough"));
+            },
+            stream::PacketDirection::Resp => if reconstructed_packets.get_resp_tcp_message().len() <= self.network_config.seq_len * self.network_config.stride {
+                return Err(anyhow!("Message not long enough"));
+            },
+            stream::PacketDirection::Both => return Err(anyhow!("Direction not supported")),
+        };
+
         let device = Device::Cuda(0);
         let byte_sequences = match(direction) {
             stream::PacketDirection::Init => preprocessing(reconstructed_packets.get_init_tcp_message(), self.network_config.seq_len, self.network_config.stride),
@@ -128,14 +139,14 @@ impl RecurrentModel for LSTMModel{
         let y = Tensor::try_from(nd_y.clone()).unwrap();
 
         let embed_out = self.embedding_layer.forward(&x.to(device));
-        println!("{:?}", embed_out.size());
+        //println!("{:?}", embed_out.size());
         let (rnn_out, _) = self.recurrent_layers.seq(&embed_out);
-        println!("{:?}", rnn_out.size());
+        //println!("{:?}", rnn_out.size());
         //TODO: FIX THIS
         let logits = self.dense_layer.forward(&rnn_out)
             .narrow(1, (self.network_config.seq_len-1).try_into().unwrap(), 1)
             .reshape(&[x.size()[0],256]);
-        println!("{:?}", logits.size());
+        //println!("{:?}", logits.size());
         //println!("{:?}", Vec::<f64>::from(&logits));
         let loss = logits.cross_entropy_for_logits(&y.to(device));
         opt.backward_step(&loss);
@@ -149,6 +160,71 @@ impl RecurrentModel for LSTMModel{
 
         Ok(())
     }
+
+    fn detect_conn(&self, reconstructed_packets: &stream::ReconstructedPackets, direction: stream::PacketDirection, threshold: f64) -> Result<bool>{
+        match(direction) {
+            stream::PacketDirection::Init => if reconstructed_packets.get_init_tcp_message().len() <= self.network_config.seq_len * self.network_config.stride {
+                return Err(anyhow!("Message not long enough"));
+            },
+            stream::PacketDirection::Resp => if reconstructed_packets.get_resp_tcp_message().len() <= self.network_config.seq_len * self.network_config.stride {
+                return Err(anyhow!("Message not long enough"));
+            },
+            stream::PacketDirection::Both => return Err(anyhow!("Direction not supported")),
+        };
+
+        let device = Device::Cuda(0);
+        let byte_sequences = match(direction) {
+            stream::PacketDirection::Init => preprocessing(reconstructed_packets.get_init_tcp_message(), self.network_config.seq_len, self.network_config.stride),
+            stream::PacketDirection::Resp => preprocessing(reconstructed_packets.get_resp_tcp_message(), self.network_config.seq_len, self.network_config.stride),
+            stream::PacketDirection::Both => panic!("PacketDirection::Both is not implemented yet")
+        };
+
+        let nd_x = byte_sequences.slice(s![.., ..-1]).to_owned();
+        let nd_y = byte_sequences.slice(s![.., -1]).to_owned();
+        let x = Tensor::try_from(nd_x.clone()).unwrap();
+        let y = Tensor::try_from(nd_y.clone()).unwrap();
+
+        let embed_out = self.embedding_layer.forward(&x.to(device));
+        //println!("{:?}", embed_out.size());
+        let (rnn_out, _) = self.recurrent_layers.seq(&embed_out);
+        //println!("{:?}", rnn_out.size());
+        //TODO: FIX THIS
+        let y_pred = self.dense_layer.forward(&rnn_out)
+            .narrow(1, (self.network_config.seq_len-1).try_into().unwrap(), 1)
+            .reshape(&[x.size()[0],256])
+            .softmax(-1, Kind::Float)
+            .multinomial(1, false)
+            .reshape(&[x.size()[0]])
+            .to(Device::Cpu);
+        //println!("{:?}", y_pred.size());
+        //println!("{:?}", Vec::<f64>::from(&y_pred));
+        //let test_accuracy = net
+        //    .forward(&m.test_images.to(device))
+        //    .accuracy_for_logits(&m.test_labels.to(device));
+
+        let arr_y_pred: ndarray::ArrayD<i64> = (&y_pred).try_into().unwrap();
+        let mut num_differs: f64 = 0.0;
+
+        for i in 0 .. nd_y.shape()[0] {
+            if nd_y[i] != arr_y_pred[i] {
+                //println!("{:?} {:?}", nd_y[i], arr_y_pred[i]);
+                num_differs += 1.0;
+            }
+        }
+
+        let message_len: f64 = (x.size()[0]) as f64 + (self.network_config.stride * self.network_config.seq_len) as f64;
+        let anomaly_score = num_differs / message_len;
+        println!("{:?}", anomaly_score);
+
+        if num_differs > threshold {
+            println!("Anomaly found");
+            return Ok(false);
+        }
+        else {
+            return Ok(true);
+        }
+    }
+
 }
 
 impl LSTMModel {

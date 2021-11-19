@@ -21,9 +21,10 @@ use rnn::RecurrentModel;
 
 fn main() {
     let ifname = env::args().nth(1).unwrap();
+    let num_training_conn = 1;
     let path = "/home/baskoro/Documents/Research/IDS/data/".to_string();
     //let mut socket = RawSocket::new(ifname.as_ref()).unwrap();
-    let port_filter = Box::new([80u8]);
+    let port_filter = Vec::from([80u16]);
     let mut srt_controller = stream::StreamReaderController::new(port_filter, false, ifname);
     
     let (packets_sender, packets_receiver): (mpsc::Sender<stream::ReconstructedPackets>, mpsc::Receiver<stream::ReconstructedPackets>) = mpsc::channel();
@@ -39,22 +40,24 @@ fn main() {
         let rnn_config: RNNConfig = Default::default();
 
         let recurrent_model = rnn::LSTMModel::new(network_config, rnn_config);
+        let mut num_conn = 0;
+        let threshold: f64 = 0.9; //static threshold for now. TODO: need to fix the way we define threshold
 
         loop {
             let data_received = srt_controller.get_ready_conn();
             //println!("Trying to get ready connection");
             match data_received {
                 Some(reconstructed_packets) => {
-                    
-                    //println!("New TCP message: {}", &reconstructed_packets.get_tcp_tuple());
-                    //println!("Init TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_init_tcp_message()));
-                    //println!("Resp TCP message: {}", String::from_utf8_lossy(&reconstructed_packets.get_resp_tcp_message()));
-                    //println!("New TCP message: {:x?}", &reconstructed_packets.get_init_tcp_message());
-                    
                     rnn::save(&reconstructed_packets, &path);
-                    recurrent_model.train_model_with_packet(&reconstructed_packets, stream::PacketDirection::Init);
-                    //let byte_sequences = rnn::preprocessing(reconstructed_packets.get_init_tcp_message(), n, stride);
-                    //reconstructed_packets.get_resp_tcp_message();
+                    if num_conn < num_training_conn {
+                        recurrent_model.train_model_with_packet(&reconstructed_packets, stream::PacketDirection::Init);
+                    }
+                    else {
+                        println!("Detecting,,,");
+                        let is_benign = recurrent_model.detect_conn(&reconstructed_packets, stream::PacketDirection::Init, threshold);
+                    }
+
+                    num_conn += 1;
                 },
                 None => {}
             }
