@@ -14,14 +14,20 @@ Blatta IDS is developed based on this research of RNN-OD[1] and not to be confus
 
 1. Install Rust and its dependency
 2. Clone the repository
+```bash
 	$ git clone https://github.com/bazz-066/blatta-ids
+```
 3. Configure the path to store the payload data. Replace the value of `path` in the `src/main.rs` file with the directory name of your own choice.
 4. [Optional] Configure the threshold by changing the `threshold` value in the `src/main.rd` file.
 5. Build the app
+```bash
 	$ cd blatta-ids/
 	$ cargo build
+```
 6. Run the app
+```bash
 	$ sudo cargo run <interface_name>
+```
 
 # References
 
