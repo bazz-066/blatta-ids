@@ -12,3 +12,5 @@ ctrlc = { version = "3.0", features = ["termination"] }
 tch = "0.5.0"
 ndarray = { version="0.15", default-features = true }
 anyhow = "1.0.44"
+#blatta_stream = { git = "https://github.com/bazz-066/blatta-stream/" }
+blatta_stream = { path = "../blatta-stream/" }

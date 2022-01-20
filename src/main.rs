@@ -1,3 +1,4 @@
+use blatta_stream::stream;
 use smoltcp::phy::wait as phy_wait;
 use smoltcp::phy::{Device, RawSocket, RxToken};
 use smoltcp::time::Instant;
@@ -14,7 +15,7 @@ use tch::nn::RNNConfig;
 //use pcap_file::PcapError;
 //use std::fs::File;
 
-mod stream;
+//mod stream;
 mod rnn;
 
 use rnn::RecurrentModel;
@@ -44,6 +45,9 @@ fn main() {
         let threshold: f64 = 0.9; //static threshold for now. TODO: need to fix the way we define threshold
 
         loop {
+            let ten_millis = std::time::Duration::from_millis(10);
+            thread::sleep(ten_millis);
+            continue;
             let data_received = srt_controller.get_ready_conn();
             //println!("Trying to get ready connection");
             match data_received {
@@ -54,6 +58,7 @@ fn main() {
                     }
                     else {
                         println!("Detecting,,,");
+                        println!("{:?}", reconstructed_packets.get_init_tcp_message());
                         let is_benign = recurrent_model.detect_conn(&reconstructed_packets, stream::PacketDirection::Init, threshold);
                     }
 
