@@ -22,7 +22,7 @@ use rnn::RecurrentModel;
 
 fn main() {
     let ifname = env::args().nth(1).unwrap();
-    let num_training_conn = 1;
+    let num_training_conn = 5;
     let path = "/home/baskoro/Documents/Research/IDS/data/".to_string();
     //let mut socket = RawSocket::new(ifname.as_ref()).unwrap();
     let port_filter = Vec::from([80u16]);
@@ -47,7 +47,7 @@ fn main() {
         loop {
             let ten_millis = std::time::Duration::from_millis(10);
             thread::sleep(ten_millis);
-            continue;
+            //continue;
             let data_received = srt_controller.get_ready_conn();
             //println!("Trying to get ready connection");
             match data_received {
@@ -58,7 +58,8 @@ fn main() {
                     }
                     else {
                         println!("Detecting,,,");
-                        println!("{:?}", reconstructed_packets.get_init_tcp_message());
+                        //println!("{:?}", reconstructed_packets.get_init_tcp_message());
+                        //println!("{:?}", String::from_utf8(reconstructed_packets.get_init_tcp_message()));
                         let is_benign = recurrent_model.detect_conn(&reconstructed_packets, stream::PacketDirection::Init, threshold);
                     }
 

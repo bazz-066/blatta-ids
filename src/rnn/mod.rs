@@ -153,10 +153,11 @@ impl RecurrentModel for LSTMModel{
         //let test_accuracy = net
         //    .forward(&m.test_images.to(device))
         //    .accuracy_for_logits(&m.test_labels.to(device));
-        println!(
-            "train loss: {:8.5}",
-            f64::from(&loss),
-        );
+        //println!(
+        //    "train loss: {:8.5}",
+        //    f64::from(loss.to_string()),
+        //);
+        loss.print();
 
         Ok(())
     }

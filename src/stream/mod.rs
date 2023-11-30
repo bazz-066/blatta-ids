@@ -168,9 +168,9 @@ impl StreamReaderThread {
                     let mut is_processed = false;
 
                     // filter out unnecessary packets
-                    if (self.port_filter.contains(&_tcp_segment.dst_port())) || (self.port_filter.contains(&_tcp_segment.src_port())) {
-                        ()
-                    }
+                    //if (self.port_filter.contains(&_tcp_segment.dst_port())) || (self.port_filter.contains(&_tcp_segment.src_port())) {
+                    //    ()
+                    //}
 
                     //println!("{}:{} -> {}:{} [LEN: {}]", _ipv4_packet.src_addr(), _tcp_segment.src_port(), _ipv4_packet.dst_addr(), _tcp_segment.dst_port(), _tcp_segment.segment_len());
                     if self.conn_list.contains_key(&key) {
@@ -282,7 +282,7 @@ impl ReconstructedPackets {
             let _stored_packet_payload = _stored_packet.payload();
             let _stored_segment = TcpPacket::new_unchecked(_stored_packet_payload);
             
-            //println!("payload: {:x?}", _stored_segment.payload());
+            println!("payload: {:x?}", _stored_segment.payload());
             payload_bytes.extend_from_slice(_stored_segment.payload());
         }
         //println!("Num bytes: {}", payload_bytes.len());

@@ -7,9 +7,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-smoltcp = "0.7.5"
+smoltcp = "0.10.0"
 ctrlc = { version = "3.0", features = ["termination"] }
-tch = "0.5.0"
+tch = "0.14.0"
 ndarray = { version="0.15", default-features = true }
 anyhow = "1.0.44"
 #blatta_stream = { git = "https://github.com/bazz-066/blatta-stream/" }
